@@ -1,0 +1,512 @@
+---
+title: "Propensity to respond Model"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r}
+vmware_dat=read.csv('C:/Users/rramn/Documents/Data_mining/IMB 623 VMWare- Digital Buyer Journey/IMB 623 VMWare- Digital Buyer Journey/Training.csv')
+#str(vmware_dat)
+
+library(caret)
+library(VIM)
+library(performanceEstimation)
+
+# Observing missing data pattern
+agg_plot=aggr(vmware_dat,col=c('red','blue'),numbers=TRUE,prop=TRUE,sortVars=TRUE,labels=names(vmware_dat),cex.axis=1,gap=0)
+temp=agg_plot$missings
+#str(temp)
+var_with_missvalues=c()
+t2=temp$Count
+for(i in 1:nrow(temp))
+{
+  t1=temp$Count[i]/nrow(vmware_dat)
+   if(temp$Count[i]>0&&t1>0.6)
+   {
+     #print(temp$Variable[i])
+     var_with_missvalues=c(var_with_missvalues,temp$Variable[i])
+   }
+}
+
+var_with_missvalues
+length(var_with_missvalues)
+
+vmware_clean=vmware_dat[,!(colnames(vmware_dat) %in% var_with_missvalues)]
+#str(vmware_clean)
+agg_plot1=aggr(vmware_clean,col=c('red','blue'),numbers=TRUE,prop=TRUE,sortVars=TRUE,labels=names(vmware_clean),cex.axis=1,gap=0)
+temp1=agg_plot1$missings
+
+```
+```{r}
+library(caret)
+#target=as.factor(vmware_clean[,'target'])
+#vmware_clean=vmware_clean[,!colnames(vmware_clean) %in% 'target']
+#str(target)
+#ctrl=trainControl(method = "cv",number = 10)
+#rf_t=train(vmware_clean,as.factor(target),method = 'rf',metric = 'Accuracy',trControl = ctrl,na.action=na.omit)
+library(randomForest)
+library(forcats)
+#rft=randomForest(target~.,data = vmware_clean,ntree=10,mtry=ncol(vmware_clean)/4,na.action=na.omit)
+for(j in 1:ncol(vmware_clean))
+{
+  if(temp1$Count[j]>0 && is.factor(vmware_clean[,temp1$Variable[j]]))
+  {
+    vmware_clean[,temp1$Variable[j]]=as.factor(ifelse(is.na(vmware_clean[,temp1$Variable[j]]),"Not available",vmware_clean[,temp1$Variable[j]]))
+  }
+}
+
+agg_plot2=aggr(vmware_clean,col=c('red','blue'),numbers=TRUE,prop=TRUE,sortVars=TRUE,labels=names(vmware_clean),cex.axis=1,gap=0)
+
+```
+
+
+
+
+```{r}
+# Variable selection (Reduction)
+library(glmnet)
+vm_target=vmware_clean[,'target']
+#vm_train=vmware_clean[,!colnames(vmware_clean) %in% 'target']
+#ind=grep("target",colnames(vmware_clean))
+#xv=model.matrix(target~.,vmware_clean)[,-1]
+#yv=vmware_clean$target
+
+# library(dplyr)
+# b=ncol(vmware_clean)-1
+# vmware_clean %>% select(-one_of('b'),one_of('b'))
+# vmware_clean[,ncol(vmware_clean)-1]
+
+xv=data.matrix(vmware_clean[,!colnames(vmware_clean) %in% 'target'])
+yv=data.matrix(vmware_clean$target)
+# cvout1=cv.glmnet(xv,yv,alpha=1,family="multinomial")
+# plot(cvout1)
+
+# Using LASSO Regression for variable selection
+cvout=glmnet(xv,yv,alpha=1,family = "multinomial",lambda = 0.00001)
+co=coef(cvout)
+
+class_0=co$`0`@i
+class_1=co$`1`@i
+class_2=co$`2`@i
+class_3=co$`3`@i
+class_4=co$`4`@i
+class_5=co$`5`@i
+
+
+new_indices=c()
+vmcol_names=c('NA')
+vmware_new=data.frame(matrix(nrow=nrow(vmware_clean)))
+
+
+for(k in 1:ncol(vmware_clean))
+{
+  if(k %in% class_0 && k %in% class_1 && k %in% class_2 && k %in% class_3 && k %in% class_4 && k %in% class_5)
+  {
+    new_indices=c(new_indices,k)
+    vmware_new=cbind(vmware_new,vmware_clean[,k])
+    vmcol_names=c(vmcol_names,names(vmware_clean)[k])
+  }
+}
+
+vmcol_names
+colnames(vmware_new)=vmcol_names
+#str(vmware_new)
+
+vmware_new=vmware_new[,-1]
+vmware_new=cbind(vmware_new,vm_target)
+names(vmware_new)[names(vmware_new)=='vm_target']='target'
+str(vmware_new)
+write.csv(vmware_new,file = "C:/Users/rramn/Documents/Data_mining/training_reduced.csv")
+
+```
+
+
+```{r}
+# Getting and cleaning Test data
+
+vmware_valid=read.csv('C:/Users/rramn/Documents/Data_mining/IMB 623 VMWare- Digital Buyer Journey/IMB 623 VMWare- Digital Buyer Journey/Validation.csv')
+#str(vmware_valid)
+
+test_target=vmware_valid[,'target']
+vmware_test=data.frame(matrix(nrow=nrow(vmware_valid)))
+vtcolnames=c('NA',colnames(vmware_new))
+vtcolnames
+for (i in 2:length(vtcolnames)) {
+  vmware_test=cbind(vmware_test,vmware_valid[,vtcolnames[i]])
+  
+}
+colnames(vmware_test)=vtcolnames
+vmware_test=vmware_test[,-1]
+#str(vmware_test)
+
+agg_plottest=aggr(vmware_test,col=c('red','blue'),numbers=TRUE,prop=TRUE,sortVars=TRUE,labels=names(vmware_test),cex.axis=1,gap=0)
+tempt=agg_plottest$missings
+tempt
+
+for(j in 1:ncol(vmware_test))
+{
+  if(tempt$Count[j]>0 && is.factor(vmware_test[,tempt$Variable[j]]))
+  {
+    vmware_test[,tempt$Variable[j]]=as.factor(ifelse(is.na(vmware_test[,tempt$Variable[j]]),"Not available",vmware_test[,tempt$Variable[j]]))
+  }
+}
+vmware_test=cbind(vmware_test,test_target)
+names(vmware_test)[names(vmware_test)=='test_target']='target'
+str(vmware_test)
+write.csv(vmware_test,file = "C:/Users/rramn/Documents/Data_mining/test_reduced.csv")
+
+```
+
+```{r}
+# SMOTE - Resampling technique to handle imbalanced classes of data using Oversampling and undersampling.
+library(tidyverse)
+library(DMwR)
+
+str(vmware_new)
+vmware_new$target=as.factor(vmware_new$target)
+vm_temp=vmware_new
+#str(vmware_new)
+vm_temp$target=as.factor(vm_temp$target)
+vm_temp=mutate(vm_temp,newtarget= ifelse(target==0,0,1))
+vm_temp$newtarget=as.factor(vm_temp$newtarget)
+#str(vm_temp$newtarget)
+#table(vm_temp$newtarget)
+
+newdat=SMOTE(newtarget~.,vm_temp,perc.over = 850,perc.under = 350)
+table(newdat$target)
+newdat=newdat[,!colnames(newdat) %in% 'newtarget']
+str(newdat)
+
+write.csv(newdat,file = "C:/Users/rramn/Documents/Data_mining/after_smote.csv")
+```
+
+```{r}
+# Gradient boosting
+library(xgboost)
+
+
+vmware_new=newdat
+targt=as.integer(vmware_new$target)-1
+str(targt)
+test_targt=as.integer(vmware_test$target)
+str(test_targt)
+vmware_temp=vmware_new[,!colnames(vmware_new) %in% 'target']
+vmwaretest_temp=vmware_test[,!colnames(vmware_test) %in% 'target']
+xgb.train=data.matrix(vmware_temp)
+xgb.train=xgb.DMatrix(data=xgb.train,label=targt)
+xgb.test1=data.matrix(vmwaretest_temp)
+xgb.test=xgb.DMatrix(data=xgb.test1,label=test_targt)
+
+num_class = length(levels(vmware_new$target))
+params=list(
+  booster="gbtree",
+  eta=0.001,
+  max_depth=5,
+  gamma=3,
+  objective="multi:softprob",
+  eval_metric="mlogloss",
+  num_class=num_class
+)
+
+params2=list(
+  booster="gbtree",
+  eta=0.9,
+  max_depth=5,
+  gamma=3,
+  objective="multi:softprob",
+  eval_metric="mlogloss",
+  num_class=num_class
+)
+
+params3=list(
+  booster="gbtree",
+  eta=0.001,
+  max_depth=5,
+  subsample=0.60,
+  gamma=3,
+  objective="multi:softprob",
+  eval_metric="mlogloss",
+  num_class=num_class
+)
+
+params4=list(
+  booster="gbtree",
+  eta=0.001,
+  max_depth=15,
+  gamma=3,
+  objective="multi:softprob",
+  eval_metric="mlogloss",
+  num_class=num_class
+)
+
+# Train the XGBoost classifer
+xgb.fit=xgb.train(
+  params=params,
+  data=xgb.train,
+  nrounds=1000,
+  early_stopping_rounds=10,
+  watchlist=list(val1=xgb.train,val2=xgb.test),
+  verbose=0
+)
+
+xgb.fit1=xgb.train(
+  params=params2,
+  data=xgb.train,
+  nrounds=1000,
+  early_stopping_rounds=10,
+  watchlist=list(val1=xgb.train,val2=xgb.test),
+  verbose=0
+)
+
+xgb.fit2=xgb.train(
+  params=params4,
+  data=xgb.train,
+  nrounds=1000,
+  early_stopping_rounds=10,
+  watchlist=list(val1=xgb.train,val2=xgb.test),
+  verbose=0
+)
+
+xgb.fit3=xgb.train(
+  params=params3,
+  data=xgb.train,
+  nrounds=1000,
+  early_stopping_rounds=10,
+  watchlist=list(val1=xgb.train,val2=xgb.test),
+  verbose=0
+)
+
+# Review the final model and results
+xgb.pred=predict(xgb.fit,xgb.test,reshape = T)
+xgb.pred = as.data.frame(xgb.pred)
+colnames(xgb.pred) = levels(as.factor(targt))
+
+
+xgb.pred1=predict(xgb.fit1,xgb.test,reshape = T)
+xgb.pred1 = as.data.frame(xgb.pred1)
+colnames(xgb.pred1) = levels(as.factor(targt))
+xgb.pred1
+
+xgb.pred2=predict(xgb.fit2,xgb.test,reshape = T)
+xgb.pred2 = as.data.frame(xgb.pred2)
+colnames(xgb.pred2) = levels(as.factor(targt))
+xgb.pred2
+
+xgb.pred3=predict(xgb.fit3,xgb.test,reshape = T)
+xgb.pred3 = as.data.frame(xgb.pred3)
+colnames(xgb.pred3) = levels(as.factor(targt))
+xgb.pred3
+
+library(performanceEstimation) # For calculating Macro- Average evaluation scores 
+# Use the predicted label with the highest probability
+xgb.pred$prediction = apply(xgb.pred,1,function(x) colnames(xgb.pred)[which.max(x)])
+xgb.pred$label = levels(as.factor(test_targt))[test_targt+1]
+p1=as.factor(xgb.pred$label)
+trues=as.factor(test_targt)
+re=classificationMetrics(trues,p1, metrics=NULL, benMtrx=NULL, allCls=unique(c(levels(as.factor(trues)),levels(as.factor(p1)))), posClass=allCls[1], beta=1)
+re
+xgbp=xgb.pred$prediction
+
+xgb.pred1$prediction = apply(xgb.pred1,1,function(x) colnames(xgb.pred1)[which.max(x)])
+xgb.pred1$label = levels(as.factor(test_targt))[test_targt+1]
+p2=as.factor(xgb.pred1$label)
+trues=as.factor(test_targt)
+re=classificationMetrics(trues,p2, metrics=NULL, benMtrx=NULL, allCls=unique(c(levels(as.factor(trues)),levels(as.factor(p2)))), posClass=allCls[1], beta=1)
+re
+
+xgb.pred2$prediction = apply(xgb.pred2,1,function(x) colnames(xgb.pred2)[which.max(x)])
+xgb.pred2$label = levels(as.factor(test_targt))[test_targt+1]
+p3=as.factor(xgb.pred2$label)
+trues=as.factor(test_targt)
+re=classificationMetrics(trues,p3, metrics=NULL, benMtrx=NULL, allCls=unique(c(levels(as.factor(trues)),levels(as.factor(p3)))), posClass=allCls[1], beta=1)
+re
+
+xgb.pred3$prediction = apply(xgb.pred3,1,function(x) colnames(xgb.pred3)[which.max(x)])
+xgb.pred3$label = levels(as.factor(test_targt))[test_targt+1]
+p4=as.factor(xgb.pred3$label)
+trues=as.factor(test_targt)
+re=classificationMetrics(trues,p4, metrics=NULL, benMtrx=NULL, allCls=unique(c(levels(as.factor(trues)),levels(as.factor(p4)))), posClass=allCls[1], beta=1)
+re
+
+# Calculate the final accuracy
+result = sum(xgb.pred$prediction==xgb.pred$label)/nrow(xgb.pred)
+print(paste("Final Accuracy =",sprintf("%1.2f%%", 100*result)))
+
+result1 = sum(xgb.pred1$prediction==xgb.pred1$label)/nrow(xgb.pred1)
+print(paste("Final Accuracy =",sprintf("%1.2f%%", 100*result)))
+
+result2 = sum(xgb.pred2$prediction==xgb.pred2$label)/nrow(xgb.pred2)
+print(paste("Final Accuracy =",sprintf("%1.2f%%", 100*result)))
+
+result3 = sum(xgb.pred3$prediction==xgb.pred3$label)/nrow(xgb.pred3)
+print(paste("Final Accuracy =",sprintf("%1.2f%%", 100*result)))
+
+
+
+```
+
+
+```{r}
+library(caret)
+
+ ##Running Random forest
+
+library(ISLR)
+
+new_data=vmware_new[, sapply(vmware_new, function(col) length(levels(col))<54)]
+
+k <- 6
+nmethod <- 1
+folds <- cut(seq(1,nrow(new_data)),breaks=k,labels=FALSE) 
+models.err <- matrix(-1,k,nmethod, dimnames=list(paste0("Fold", 1:k), c("rf")))
+
+for(i in 1:k)
+{ 
+  testIndexes <- which(folds==i, arr.ind=TRUE) 
+  testData <- new_data[testIndexes, ] 
+  trainData <- new_data[-testIndexes, ] 
+  
+  ind <- sample(2, nrow(trainData), replace = T, prob = c(0.7, 0.3))
+  Train <- trainData[ind == 1, ]
+  Validation <- trainData[ind == 2, ]
+  
+  pr.err <- c()
+  for(mt in seq(1,ncol(Train))){
+    library(randomForest)
+    rf <- randomForest(target~., data = Train, ntree = 10, mtry = ifelse(mt == ncol(Train), mt - 1,mt))
+    predicted <- predict(rf, newdata = Validation, type = "class")
+    pr.err <- c(pr.err,mean(Validation$target != predicted)) 
+  }
+  
+  bestmtry <- which.min(pr.err) 
+  
+  library(randomForest)
+  rf <- randomForest(target~., data = trainData, ntree = 100, mtry = bestmtry)
+  rf.pred <- predict(rf, newdata = testData, type = "class")
+  models.err[i] <- mean(testData$target != rf.pred)
+}
+
+print(bestmtry)
+mean(models.err)
+
+
+rf.pred = predict(rf, newdata = vmware_test, type = "class")
+library(performanceEstimation)
+trues=vmware_test$target
+preds=rf.pred
+re=classificationMetrics(trues,preds, metrics=NULL, benMtrx=NULL, allCls=unique(c(levels(as.factor(trues)),levels(as.factor(preds)))), posClass=allCls[1], beta=1)
+re
+
+## Running Logistic Regression with different Regularization techniques
+library(LiblineaR)
+tryTypes <- c(0,6)
+tryCosts <- c(1000,1,0.001)
+bestCost <- NA
+bestAcc <- 0
+bestType <- NA
+
+xv=data.matrix(vmware_new[,!colnames(vmware_new) %in% 'target'])
+y_vars=data.matrix(vmware_new$target)
+xtest=data.matrix(vmware_test[,!colnames(vmware_new) %in% 'target'])
+ytest=data.matrix(vmware_test$target)
+
+for(ty in tryTypes){
+  for(co in tryCosts){
+    acc <- LiblineaR(data=xv, target=y_vars, type=ty, cost=co, cross=5, verbose=FALSE)
+    cat("Results for C=",co," : ",acc," accuracy.\n",sep="")
+    if(acc>bestAcc){
+      bestCost <- co
+      bestAcc <- acc
+      bestType <- ty
+    }
+  }
+}
+
+cat("Best model type is:",bestType,"\n")
+cat("Best cost is:",bestCost,"\n")
+cat("Best accuracy is:",bestAcc,"\n")
+
+
+best_lglmmodel = LiblineaR(data=xv, target=y_vars, type=bestType, cost=bestCost)
+
+p=predict(best_lglmmodel,xtest)
+lassop=p$predictions
+trues=ytest
+preds=p$predictions
+re=classificationMetrics(trues,preds, metrics=NULL, benMtrx=NULL, allCls=unique(c(levels(as.factor(trues)),levels(as.factor(preds)))), posClass=allCls[1], beta=1)
+re
+
+
+```
+
+
+
+
+```{r}
+#Stacking with xgboost as a meta learner
+library(xgboost)
+library(caret)
+length(xgbp)
+
+# Combining predictions from the Random forest L1 logistic regression and gradient boosting into a Dataframe for stacking
+prdf=data.frame(rf.pred,xgbp,lassop,target=vmware_test$target)
+
+xv=data.matrix(prdf[,!colnames(prdf) %in% 'target'])
+yv=data.matrix(prdf$target)
+# cvout1=cv.glmnet(xv,yv,alpha=1,family="multinomial")
+# plot(cvout1)
+#out=train(target~.,method="gbm",data=prdf,distribution="multinomial")
+
+#Stacking - Xgboost as a Meta Learner
+xgb.train1=xgb.DMatrix(data=xv,label=targt)
+xgb.fit_all=xgb.train(
+  params=params,
+  data=xgb.train1,
+  nrounds=1000,
+  early_stopping_rounds=10,
+  watchlist=list(val1=xgb.train1,val2=xgb.test),
+  verbose=0
+)
+
+xgb.predn=predict(xgb.fit_all,xgb.train1,reshape = T)
+xgb.predn = as.data.frame(xgb.predn)
+colnames(xgb.predn) = levels(as.factor(targt))
+
+
+xgb.predn$prediction = apply(xgb.predn,1,function(x) colnames(xgb.predn)[which.max(x)])
+xgb.predn$label = levels(as.factor(test_targt))[test_targt+1]
+p1=as.factor(xgb.predn$label)
+trues=as.factor(test_targt)
+re=classificationMetrics(trues,p1, metrics=NULL, benMtrx=NULL, allCls=unique(c(levels(as.factor(trues)),levels(as.factor(p1)))), posClass=allCls[1], beta=1)
+re
+
+resultn = sum(xgb.predn$prediction==xgb.predn$label)/nrow(xgb.predn)
+print(paste("Final Accuracy =",sprintf("%1.2f%%", 100*result)))
+
+
+
+
+```
+
+
+
+
+
+
+
+```{r}
+
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
